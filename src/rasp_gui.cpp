@@ -1,24 +1,24 @@
-#include <QApplication> // Manages the Qt application and GUI event loop
-#include <QWidget>      // Base class for all visual containers like windows
-#include <QRadioButton> // Allows user to select one LED at a time
-#include <QPushButton>  // Push button for exiting the application
-#include <QVBoxLayout>  // Layout manager that arranges widgets vertically
-#include <QLabel>       // Displays static text (used for the GUI title)
-#include <QGroupBox>    // Visually groups related widgets (like LED controls)
-#include <QFont>        // Provides font customization for widgets
-#include <QPalette>     // Allows color customization (background, foreground)
-#include <memory>       // For std::unique_ptr — smart pointer for safe memory handling
-#include <stdexcept>    // For throwing runtime errors during GPIO setup
-#include <pigpio.h>     // Raspberry Pi GPIO control library
+#include <QApplication> // Manages the Qt application and event loop
+#include <QWidget>      // Base class for all UI windows and containers
+#include <QLineEdit>    // Input box for entering LED color text
+#include <QPushButton>  // Buttons for setting the LED and exiting the app
+#include <QVBoxLayout>  // Arranges widgets vertically
+#include <QLabel>       // Displays static text labels (e.g., window title)
+#include <QFont>        // Controls font family, size, weight, etc.
+#include <QPalette>     // Used to set GUI background color
+#include <memory>       // Enables usage of std::unique_ptr for safety
+#include <stdexcept>    // Allows throwing runtime errors during setup
+#include <QString>      // Qt’s string class (used for typed input)
+#include <pigpio.h>     // Library for Raspberry Pi GPIO access
 
-// GPIO pin assignments for the three LEDs
-constexpr int RED_LED{17};   // Connected to GPIO pin 17 (physical pin 11)
-constexpr int GREEN_LED{27}; // Connected to GPIO pin 27 (physical pin 13)
-constexpr int BLUE_LED{22};  // Connected to GPIO pin 22 (physical pin 15)
+// GPIO pin assignments for three LEDs
+constexpr int RED_LED{17};   // GPIO 17 (physical pin 11)
+constexpr int GREEN_LED{27}; // GPIO 27 (physical pin 13)
+constexpr int BLUE_LED{22};  // GPIO 22 (physical pin 15)
 
 /**
- * @brief Initializes the pigpio library and sets up each LED pin as output.
- *        Throws a runtime_error if pigpio fails to initialize.
+ * @brief Initializes the pigpio library and sets all LED pins as output.
+ *        Throws an exception if pigpio fails to initialize (e.g., not running as root).
  */
 void setupGpio()
 {
@@ -27,15 +27,14 @@ void setupGpio()
         throw std::runtime_error{"GPIO initialization failed"};
     }
 
-    // Set each pin as output to control the LEDs
     gpioSetMode(RED_LED, PI_OUTPUT);
     gpioSetMode(GREEN_LED, PI_OUTPUT);
     gpioSetMode(BLUE_LED, PI_OUTPUT);
 }
 
 /**
- * @brief Turns ON the selected LED while turning OFF the other two.
- *        Ensures that only one LED is ON at a time.
+ * @brief Turns on only the specified LED and ensures the others are turned off.
+ * @param pin The GPIO pin number for the LED to turn on.
  */
 void turnOnOnly(int pin)
 {
@@ -45,77 +44,75 @@ void turnOnOnly(int pin)
 }
 
 /**
- * @brief Creates the title label for the GUI window.
- *        Uses a smart pointer for temporary ownership during construction.
- *        Ownership is released later to Qt layout manager.
+ * @brief Creates the centered title label with custom font and white text.
+ *        Returns a smart pointer, which will later be released to Qt's layout manager.
  */
 std::unique_ptr<QLabel> createTitleLabel()
 {
-    auto label{std::make_unique<QLabel>("LED Controller Interface")};
+    auto label{std::make_unique<QLabel>("Text-Based LED Controller")};
 
     QFont font{"Arial", 16, QFont::Bold};
     label->setFont(font);
     label->setAlignment(Qt::AlignCenter);
-    label->setStyleSheet("QLabel { color: white; }"); // White text on black background
+    label->setStyleSheet("QLabel { color: white; }");
 
     return label;
 }
 
 /**
- * @brief Creates the LED selection controls: 3 radio buttons inside a QGroupBox.
- *        Each button is connected to a corresponding LED pin.
- *        Memory is transferred to Qt using .release() where applicable.
+ * @brief Creates the input section:
+ *        - A QLineEdit for typing "red", "green", or "blue"
+ *        - A QPushButton to apply the selection
+ *
+ * @return A QWidget containing both elements, laid out horizontally.
  */
-std::unique_ptr<QGroupBox> createLedControls()
+std::unique_ptr<QWidget> createLedInputSection()
 {
-    // Smart pointers for each radio button
-    auto redBtn{std::make_unique<QRadioButton>("Red LED")};
-    auto greenBtn{std::make_unique<QRadioButton>("Green LED")};
-    auto blueBtn{std::make_unique<QRadioButton>("Blue LED")};
+    // Input field where user types LED color
+    auto input{std::make_unique<QLineEdit>()};
+    input->setPlaceholderText("Type red / green / blue");
+    input->setFont(QFont{"Arial", 12});
+    input->setStyleSheet("QLineEdit { background-color: white; color: black; padding: 4px; }");
 
-    QFont btnFont{"Arial", 12};
-    redBtn->setFont(btnFont);
-    greenBtn->setFont(btnFont);
-    blueBtn->setFont(btnFont);
+    // Button to trigger GPIO control
+    auto button{std::make_unique<QPushButton>("Set LED")};
+    button->setFont(QFont{"Arial", 12});
+    button->setStyleSheet("QPushButton { background-color: grey; color: white; padding: 5px; }");
 
-    // Set colored text for better readability
-    redBtn->setStyleSheet("QRadioButton { color: red; }");
-    greenBtn->setStyleSheet("QRadioButton { color: green; }");
-    blueBtn->setStyleSheet("QRadioButton { color: cyan; }");
+    // Connect button to the LED selection logic
+    QObject::connect(button.get(), &QPushButton::clicked, [line = input.get()]()
+                     {
+        const QString text = line->text().trimmed().toLower();
 
-    // Connect each button's clicked signal to turn on the correct LED
-    QObject::connect(redBtn.get(), &QRadioButton::clicked, []()
-                     { turnOnOnly(RED_LED); });
-    QObject::connect(greenBtn.get(), &QRadioButton::clicked, []()
-                     { turnOnOnly(GREEN_LED); });
-    QObject::connect(blueBtn.get(), &QRadioButton::clicked, []()
-                     { turnOnOnly(BLUE_LED); });
+        if (text == "red") {
+            turnOnOnly(RED_LED);
+        } else if (text == "green") {
+            turnOnOnly(GREEN_LED);
+        } else if (text == "blue") {
+            turnOnOnly(BLUE_LED);
+        } else {
+            qWarning("Invalid color input: use red, green, or blue");
+        } });
 
-    // Layout to stack the buttons vertically
-    auto layout{std::make_unique<QVBoxLayout>()};
-    layout->addWidget(redBtn.get());
-    layout->addWidget(greenBtn.get());
-    layout->addWidget(blueBtn.get());
+    // Place the input and button side-by-side
+    auto layout{std::make_unique<QHBoxLayout>()};
+    layout->addWidget(input.get());
+    layout->addWidget(button.get());
 
-    // Group box to visually contain the buttons
-    auto group{std::make_unique<QGroupBox>("Select LED to Turn On")};
-    group->setFont(QFont{"Arial", 11});
-    group->setStyleSheet("QGroupBox { color: white; }");
+    auto container{std::make_unique<QWidget>()};
+    container->setLayout(layout.release());
 
-    // Important: Qt takes ownership of the layout and all its child widgets
-    group->setLayout(layout.release());
+    // When added to a layout, Qt assumes ownership.
+    // We call release() to prevent double-deletion when smart pointers go out of scope.
+    input.release();
+    button.release();
 
-    // Release smart pointers so they don't delete objects Qt now owns
-    redBtn.release();
-    greenBtn.release();
-    blueBtn.release();
-
-    return group;
+    return container;
 }
 
 /**
- * @brief Creates a styled Exit button that gracefully quits the app.
- *        Clicking it triggers QApplication::quit().
+ * @brief Creates the Exit button that closes the application.
+ *        Uses smart pointer and later releases it to the layout.
  */
 std::unique_ptr<QPushButton> createExitButton()
 {
@@ -123,79 +120,83 @@ std::unique_ptr<QPushButton> createExitButton()
     button->setFont(QFont{"Arial", 12});
     button->setStyleSheet("QPushButton { background-color: grey; color: white; padding: 5px; }");
 
-    // Connect button to Qt's quit signal
+    // Connect button to quit the application
     QObject::connect(button.get(), &QPushButton::clicked, []()
-                     { QApplication::quit(); });
+                     {
+                         QApplication::quit(); // Triggers aboutToQuit for GPIO cleanup
+                     });
 
     return button;
 }
 
 /**
- * @brief Constructs the full GUI layout and returns it as a smart pointer.
- *        Qt takes ownership of widgets through the layout system, so we release smart pointers accordingly.
+ * @brief Creates the complete GUI window with title, input section, and Exit button.
+ *        Returns a smart pointer that is safely managed in main().
  */
 std::unique_ptr<QWidget> createGui()
 {
     auto window{std::make_unique<QWidget>()};
-    window->setWindowTitle("Dark Mode LED GUI");
-    window->setFixedSize(400, 250); // Fixed size window
+    window->setWindowTitle("LED Control - Text Input");
+    window->setFixedSize(420, 200);
 
-    // Set black background using QPalette
+    // Set dark theme background
     QPalette palette{window->palette()};
     palette.setColor(QPalette::Window, Qt::black);
     window->setAutoFillBackground(true);
     window->setPalette(palette);
 
-    // Build all UI components
+    // Build subcomponents
     auto titleLabel{createTitleLabel()};
-    auto ledGroup{createLedControls()};
+    auto inputSection{createLedInputSection()};
     auto exitButton{createExitButton()};
     auto layout{std::make_unique<QVBoxLayout>()};
 
-    // Add widgets to layout and transfer ownership to Qt
-    layout->addWidget(titleLabel.release()); // QLabel released to Qt
-    layout->addWidget(ledGroup.release());   // QGroupBox released to Qt
-    layout->addWidget(exitButton.get());     // Temporarily used for alignment
+    // Transfer widget ownership to Qt by releasing smart pointers
+    layout->addWidget(titleLabel.release());
+    layout->addWidget(inputSection.release());
+    layout->addWidget(exitButton.get()); // Keep a reference to center align it
     layout->setAlignment(exitButton.get(), Qt::AlignCenter);
-    exitButton.release(); // Qt now owns the button
+    exitButton.release(); // Now Qt owns the button
 
-    layout->addStretch();                // Push Exit button upward slightly for better spacing
-    window->setLayout(layout.release()); // Layout transferred to Qt
+    layout->addStretch(); // Adds spacing at the bottom
+    window->setLayout(layout.release());
 
-    return window; // Smart pointer returned to be held by main()
+    return window; // Return smart pointer holding the top-level window
 }
 
 /**
- * @brief Main entry point. Initializes GPIO, sets up cleanup handler, builds and runs GUI.
+ * @brief Main function:
+ *        - Initializes GPIO
+ *        - Sets up automatic cleanup
+ *        - Launches the Qt GUI
  */
 int main(int argc, char *argv[])
 {
-    QApplication app{argc, argv}; // Qt application instance
+    QApplication app{argc, argv};
 
     try
     {
-        setupGpio(); // Initialize all GPIOs for LED output
+        setupGpio(); // Initialize GPIO safely
 
-        // Register a cleanup handler when application is about to quit
+        // Ensure GPIO cleanup on normal or forced app quit
         QObject::connect(&app, &QCoreApplication::aboutToQuit, []()
                          {
                              gpioWrite(RED_LED, 0);
                              gpioWrite(GREEN_LED, 0);
                              gpioWrite(BLUE_LED, 0);
-                             gpioTerminate(); // Reset all GPIOs and release pigpio resources
+                             gpioTerminate(); // Gracefully close pigpio
                          });
 
-        // Create main window GUI and show it
+        // Show the GUI
         std::unique_ptr<QWidget> window{createGui()};
         window->show();
 
-        return app.exec(); // Start the Qt event loop
+        return app.exec(); // Enter Qt event loop
     }
     catch (const std::exception &ex)
     {
-        // Print error and ensure GPIO shutdown if setup failed
         qCritical("Startup Error: %s", ex.what());
-        gpioTerminate();
+        gpioTerminate(); // Failsafe: release GPIO on failure
         return 1;
     }
 }
